@@ -1,0 +1,8 @@
+config.py
+zerodha_token.json
+__pycache__/
+*.pyc
+venv/
+logs/
+data/
+*.log
