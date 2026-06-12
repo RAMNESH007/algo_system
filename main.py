@@ -7,9 +7,9 @@ from config import *
 from risk.manager import RiskManager
 from alerts.telegram import send_alert
 from brokers.alpaca import AlpacaBroker
-from brokers.binance_broker import BinanceBroker
+# from brokers.binance_broker import BinanceBroker
 from brokers.zerodha import ZerodhaBroker
-from brokers.market_hours import is_us_open, is_india_open
+from brokers.market_hours import is_us_open, is_india_open, is_squareoff_time
 from strategies.combined import get_combined_signal
 from strategies.risk_levels import (check_stop_loss,
                                     check_take_profit,
@@ -20,7 +20,7 @@ from strategies.risk_levels import (check_stop_loss,
 # ═══════════════════════════════════════
 rm = RiskManager(TOTAL_CAPITAL, MAX_DRAWDOWN_PCT)
 alpaca = AlpacaBroker(ALPACA_API_KEY, ALPACA_SECRET, ALPACA_BASE_URL)
-binance = BinanceBroker(BINANCE_API_KEY, BINANCE_SECRET)
+# binance = BinanceBroker(BINANCE_API_KEY, BINANCE_SECRET)
 
 # Load Zerodha
 def load_zerodha():
@@ -164,81 +164,24 @@ def run_us_strategy():
         print(f"❌ US error: {e}")
 
 # ═══════════════════════════════════════
-# CRYPTO STRATEGY
+# CRYPTO STRATEGY — COMMENTED OUT
 # ═══════════════════════════════════════
-def run_crypto_strategy():
-    if not rm.trading_allowed:
-        return
-
-    try:
-        for symbol in CRYPTO_SYMBOLS:
-            try:
-                df = binance.get_data(symbol, interval='1m', limit=100)
-                if df is None or len(df) < 30:
-                    continue
-
-                signal = get_combined_signal(df)
-                price = float(df['close'].iloc[-1])
-                print(f"📊 {symbol}: ${price:.2f} | {signal}")
-
-                # Stop loss / Take profit
-                if symbol in long_positions:
-                    entry = long_positions[symbol]
-                    usdt = binance.get_balance('USDT')
-                    qty = round((usdt * 0.05) / price, 6)
-
-                    if check_stop_loss(entry, price):
-                        asset = symbol.replace('USDT', '')
-                        qty = binance.get_balance(asset)
-                        binance.place_order(symbol, 'SELL', round(qty, 6))
-                        pnl = calculate_pnl(entry, price, qty)
-                        long_positions.pop(symbol)
-                        send_alert(TELEGRAM_TOKEN, TELEGRAM_CHAT_ID,
-                                  f"🛑 *STOP LOSS* {symbol}\n"
-                                  f"💵 ${price:.2f} | 🔴 ${pnl:.2f}")
-                        continue
-
-                    if check_take_profit(entry, price):
-                        asset = symbol.replace('USDT', '')
-                        qty = binance.get_balance(asset)
-                        binance.place_order(symbol, 'SELL', round(qty, 6))
-                        pnl = calculate_pnl(entry, price, qty)
-                        long_positions.pop(symbol)
-                        send_alert(TELEGRAM_TOKEN, TELEGRAM_CHAT_ID,
-                                  f"🎯 *TAKE PROFIT* {symbol}\n"
-                                  f"💵 ${price:.2f} | 🟢 ${pnl:.2f}")
-                        continue
-
-                # New signals
-                if signal == "BUY" and symbol not in long_positions:
-                    usdt_balance = binance.get_balance('USDT')
-                    quantity = round((usdt_balance * 0.05) / price, 6)
-                    if quantity > 0:
-                        binance.place_order(symbol, 'BUY', quantity)
-                        long_positions[symbol] = price
-                        send_alert(TELEGRAM_TOKEN, TELEGRAM_CHAT_ID,
-                                  f"✅ *BUY* {symbol} 🌍\n"
-                                  f"💵 ${price:.2f} | 📦 {quantity}\n"
-                                  f"🛑 ${price*(1-STOP_LOSS_PCT):.2f} | "
-                                  f"🎯 ${price*(1+TAKE_PROFIT_PCT):.2f}")
-
-                elif signal == "SELL" and symbol in long_positions:
-                    asset = symbol.replace('USDT', '')
-                    qty = binance.get_balance(asset)
-                    if qty > 0:
-                        binance.place_order(symbol, 'SELL', round(qty, 6))
-                        entry = long_positions.pop(symbol)
-                        pnl = calculate_pnl(entry, price, qty)
-                        emoji = "🟢" if pnl > 0 else "🔴"
-                        send_alert(TELEGRAM_TOKEN, TELEGRAM_CHAT_ID,
-                                  f"📤 *SELL* {symbol}\n"
-                                  f"💵 ${price:.2f} | {emoji} ${pnl:.2f}")
-
-            except Exception as e:
-                print(f"❌ {symbol}: {e}")
-
-    except Exception as e:
-        print(f"❌ Crypto error: {e}")
+# def run_crypto_strategy():
+#     if not rm.trading_allowed:
+#         return
+#     try:
+#         for symbol in CRYPTO_SYMBOLS:
+#             try:
+#                 df = binance.get_data(symbol, interval='1m', limit=100)
+#                 if df is None or len(df) < 30:
+#                     continue
+#                 signal = get_combined_signal(df)
+#                 price = float(df['close'].iloc[-1])
+#                 print(f"📊 {symbol}: ${price:.2f} | {signal}")
+#             except Exception as e:
+#                 print(f"❌ {symbol}: {e}")
+#     except Exception as e:
+#         print(f"❌ Crypto error: {e}")
 
 # ═══════════════════════════════════════
 # INDIA STRATEGY
@@ -247,8 +190,30 @@ def run_india_strategy():
     if zerodha is None:
         print("⚠️ Zerodha not connected")
         return
+
     if not is_india_open():
         print("💤 India Market closed")
+        return
+
+    # Auto square off at 3:15 PM
+    if is_squareoff_time():
+        print("⏰ Square off time!")
+        for key in list(long_positions.keys()):
+            if key.startswith('IN_'):
+                symbol = key.replace('IN_', '')
+                positions = zerodha.get_positions()
+                for p in positions:
+                    if p['tradingsymbol'] == symbol:
+                        qty = p['quantity']
+                        if qty > 0:
+                            zerodha.close_position(symbol, qty)
+                            long_positions.pop(key)
+                            send_alert(
+                                TELEGRAM_TOKEN,
+                                TELEGRAM_CHAT_ID,
+                                f"⏰ *SQUARE OFF* {symbol} 🇮🇳\n"
+                                f"Market closing soon!"
+                            )
         return
 
     try:
@@ -321,7 +286,7 @@ def master_run():
     print(f"🤖 MyAlgoBot running...")
     run_india_strategy()
     run_us_strategy()
-    run_crypto_strategy()
+    # run_crypto_strategy()
     print(f"{'═'*40}")
 
 # Every 1 minute
@@ -331,7 +296,6 @@ send_alert(TELEGRAM_TOKEN, TELEGRAM_CHAT_ID,
           "🚀 *MyAlgoBot v2 Started!*\n"
           f"🇮🇳 India: {len(INDIA_SYMBOLS)} stocks\n"
           f"🇺🇸 US: {len(US_SYMBOLS)} stocks\n"
-          f"🌍 Crypto: {len(CRYPTO_SYMBOLS)} pairs\n"
           f"📉 Short selling: ON\n"
           f"🛑 Stop loss: {STOP_LOSS_PCT*100}%\n"
           f"🎯 Take profit: {TAKE_PROFIT_PCT*100}%\n"
@@ -340,7 +304,6 @@ send_alert(TELEGRAM_TOKEN, TELEGRAM_CHAT_ID,
 print(f"✅ MyAlgoBot v2 started!")
 print(f"🇮🇳 India: {INDIA_SYMBOLS}")
 print(f"🇺🇸 US: {US_SYMBOLS}")
-print(f"🌍 Crypto: {CRYPTO_SYMBOLS}")
 print(f"📉 Short selling: ON")
 print(f"🛑 Stop: {STOP_LOSS_PCT*100}% | 🎯 Target: {TAKE_PROFIT_PCT*100}%")
 

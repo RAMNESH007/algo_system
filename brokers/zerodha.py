@@ -33,14 +33,18 @@ class ZerodhaBroker:
             print(f"❌ Balance error: {e}")
             return 0.0
 
-    def get_data(self, symbol, interval='minute', days=5):
+    def get_data(self, symbol, interval='minute', days=2):
         try:
             instruments = self.kite.instruments('NSE')
             df_inst = pd.DataFrame(instruments)
-            token = df_inst[df_inst['tradingsymbol'] == symbol]['instrument_token'].values[0]
+            token = df_inst[
+                df_inst['tradingsymbol'] == symbol
+            ]['instrument_token'].values[0]
             end = datetime.now()
             start = end - timedelta(days=days)
-            data = self.kite.historical_data(token, start, end, interval)
+            data = self.kite.historical_data(
+                token, start, end, interval
+            )
             df = pd.DataFrame(data)
             return df
         except Exception as e:
@@ -53,17 +57,37 @@ class ZerodhaBroker:
                 variety=self.kite.VARIETY_REGULAR,
                 exchange=self.kite.EXCHANGE_NSE,
                 tradingsymbol=symbol,
-                transaction_type=(self.kite.TRANSACTION_TYPE_BUY
-                                 if side == 'buy'
-                                 else self.kite.TRANSACTION_TYPE_SELL),
+                transaction_type=(
+                    self.kite.TRANSACTION_TYPE_BUY
+                    if side == 'buy'
+                    else self.kite.TRANSACTION_TYPE_SELL
+                ),
                 quantity=qty,
                 product=self.kite.PRODUCT_MIS,
                 order_type=self.kite.ORDER_TYPE_MARKET
             )
-            print(f"✅ Zerodha: {side} {qty} {symbol}")
+            print(f"✅ Zerodha MIS: {side} {qty} {symbol}")
             return order_id
         except Exception as e:
             print(f"❌ Order failed: {e}")
 
     def close_position(self, symbol, qty):
-        self.place_order(symbol, qty, 'sell')
+        try:
+            self.place_order(symbol, qty, 'sell')
+            print(f"📤 Closed: {symbol}")
+        except Exception as e:
+            print(f"❌ Close failed: {e}")
+
+    def get_positions(self):
+        try:
+            return self.kite.positions()['day']
+        except Exception as e:
+            print(f"❌ Positions error: {e}")
+            return []
+
+    def get_orders(self):
+        try:
+            return self.kite.orders()
+        except Exception as e:
+            print(f"❌ Orders error: {e}")
+            return []

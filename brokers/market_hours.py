@@ -18,5 +18,10 @@ def is_india_open():
     h, m = now.hour, now.minute
     return (h == 9 and m >= 15) or (10 <= h <= 14) or (h == 15 and m <= 30)
 
+def is_squareoff_time():
+    now = datetime.now(IST)
+    h, m = now.hour, now.minute
+    return h == 15 and m >= 15
+
 def is_crypto_open():
     return True
